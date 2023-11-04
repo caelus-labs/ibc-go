@@ -9,6 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	cmbytes "github.com/cometbft/cometbft/libs/bytes"
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
+
 	goheaderstore "github.com/celestiaorg/go-header/store"
 	abci "github.com/cometbft/cometbft/abci/types"
 	cmcrypto "github.com/cometbft/cometbft/crypto"
@@ -546,6 +549,36 @@ func (m *Manager) getCommit(header types.Header) (*types.Commit, error) {
 	}, nil
 }
 
+// sign to the vote, since we only have one validator, it's similar with sign to the header
+// for compatible with light client verify in IBC
+func (m *Manager) getCommitBySignVote(header types.Header) (*types.Commit, error) {
+	vote := cmtproto.Vote{
+		Type:   cmtproto.PrecommitType,
+		Height: int64(header.Height()),
+		Round:  0,
+		// Header hash = block hash in rollkit
+		BlockID: cmtproto.BlockID{
+			Hash:          cmbytes.HexBytes(header.Hash()),
+			PartSetHeader: cmtproto.PartSetHeader{},
+		},
+		Timestamp: header.Time(),
+		// proposerAddress = sequencer = validator
+		ValidatorAddress: header.ProposerAddress,
+		ValidatorIndex:   0,
+	}
+	chainID := header.ChainID()
+	signBytes := cmtypes.VoteSignBytes(chainID, &vote)
+
+	sign, err := m.proposerKey.Sign(signBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	return &types.Commit{
+		Signatures: []types.Signature{sign},
+	}, nil
+}
+
 func (m *Manager) IsProposer() (bool, error) {
 	m.lastStateMtx.RLock()
 	defer m.lastStateMtx.RUnlock()
@@ -611,7 +644,7 @@ func (m *Manager) publishBlock(ctx context.Context) error {
 			return nil
 		}
 		block.SignedHeader.Header.NextAggregatorsHash = m.getNextAggregatorsHash()
-		commit, err = m.getCommit(block.SignedHeader.Header)
+		commit, err = m.getCommitBySignVote(block.SignedHeader.Header)
 		if err != nil {
 			return err
 		}
@@ -642,7 +675,7 @@ func (m *Manager) publishBlock(ctx context.Context) error {
 
 	block.SignedHeader.Header.NextAggregatorsHash = newState.NextValidators.Hash()
 
-	commit, err = m.getCommit(block.SignedHeader.Header)
+	commit, err = m.getCommitBySignVote(block.SignedHeader.Header)
 	if err != nil {
 		return err
 	}

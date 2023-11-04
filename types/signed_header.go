@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
+
 	"github.com/celestiaorg/go-header"
 	"github.com/cometbft/cometbft/crypto/ed25519"
+	cmbytes "github.com/cometbft/cometbft/libs/bytes"
 	cmtypes "github.com/cometbft/cometbft/types"
 )
 
@@ -110,11 +113,30 @@ func (sh *SignedHeader) ValidateBasic() error {
 	signature := sh.Commit.Signatures[0]
 	proposer := sh.Validators.GetProposer()
 	var pubKey ed25519.PubKey = proposer.PubKey.Bytes()
-	msg, err := sh.Header.MarshalBinary()
-	if err != nil {
-		return errors.New("signature verification failed, unable to marshal header")
+	// msg, err := sh.Header.MarshalBinary()
+	// if err != nil {
+	// 	return errors.New("signature verification failed, unable to marshal header")
+	// }
+	header := sh.Header
+	// using vote here
+	vote := cmtproto.Vote{
+		Type:   cmtproto.PrecommitType,
+		Height: int64(header.Height()),
+		Round:  0,
+		// Header hash = block hash in rollkit
+		BlockID: cmtproto.BlockID{
+			Hash:          cmbytes.HexBytes(header.Hash()),
+			PartSetHeader: cmtproto.PartSetHeader{},
+		},
+		Timestamp: header.Time(),
+		// proposerAddress = sequencer = validator
+		ValidatorAddress: header.ProposerAddress,
+		ValidatorIndex:   0,
 	}
-	if !pubKey.VerifySignature(msg, signature) {
+	chainID := header.ChainID()
+	signBytes := cmtypes.VoteSignBytes(chainID, &vote)
+
+	if !pubKey.VerifySignature(signBytes, signature) {
 		return ErrSignatureVerificationFailed
 	}
 

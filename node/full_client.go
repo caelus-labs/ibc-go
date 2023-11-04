@@ -484,6 +484,8 @@ func (c *FullClient) BlockResults(ctx context.Context, height *int64) (*ctypes.R
 func (c *FullClient) Commit(ctx context.Context, height *int64) (*ctypes.ResultCommit, error) {
 	heightValue := c.normalizeHeight(height)
 	com, err := c.node.Store.LoadCommit(heightValue)
+
+	//
 	if err != nil {
 		return nil, err
 	}
@@ -491,7 +493,11 @@ func (c *FullClient) Commit(ctx context.Context, height *int64) (*ctypes.ResultC
 	if err != nil {
 		return nil, err
 	}
-	commit := com.ToABCICommit(heightValue, b.Hash())
+
+	// we only have one validator
+	val := b.SignedHeader.Validators.Validators[0].Address
+
+	commit := com.ToABCICommit(heightValue, b.Hash(), val, b.SignedHeader.Time())
 	block, err := abciconv.ToABCIBlock(b)
 	if err != nil {
 		return nil, err
